@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Shooter Game</title>
+    <style>
+        canvas {
+            border: 1px solid black;
+            background-color: #8B4513;  /* Saddle Brown color for dirt */
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #654321;  /* Darker brown for the outer background */
+        }
+        #gameContainer {
+            position: relative;
+        }
+        .overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            display: none;
+        }
+        .button {
+            padding: 10px 20px;
+            font-size: 18px;
+            margin: 10px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        .button:hover {
+            background-color: #45a049;
+        }
+        #pauseButton {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: block;
+        }
+        #scores {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: black;
+            font-size: 20px;
+            font-family: Arial;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="scores">
+            <div>Score: <span id="currentScore">0</span></div>
+            <div>Highest Score: <span id="highScore">0</span></div>
+            <div>Wave: <span id="waveNumber">1</span></div>
+        </div>
+        <button id="pauseButton" class="button">Pause (P)</button>
+        <div id="pauseOverlay" class="overlay">
+            <h1>PAUSED</h1>
+            <button class="button" onclick="resumeGame()">Resume</button>
+        </div>
+        <div id="gameOverOverlay" class="overlay">
+            <h1>GAME OVER</h1>
+            <p>Score: <span id="finalScore">0</span></p>
+            <p>High Score: <span id="finalHighScore">0</span></p>
+            <button class="button" onclick="restartGame()">Restart</button>
+        </div>
+    </div>
+    <script src="player.js"></script>
+    <script src="enemy.js"></script>
+    <script src="projectile.js"></script>
+    <script src="game.js"></script>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const game = new Game();
+        game.init();
+
+        function gameLoop() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Update game state
+            game.update();
+
+            // Draw player (without rotation)
+            if (game.isInvisible) {
+                ctx.globalAlpha = 0.3;  // Make player semi-transparent when invisible
+            }
+            ctx.drawImage(
+                game.sprites.player,
+                game.player.x,
+                game.player.y,
+                game.player.width,
+                game.player.height
+            );
+            ctx.globalAlpha = 1;
+
+            // After drawing player
+            if (game.shieldActive) {
+                ctx.beginPath();
+                ctx.arc(
+                    game.player.x + game.player.width/2,
+                    game.player.y - 10,
+                    5,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fillStyle = 'cyan';
+                ctx.fill();
+            }
+
+            // Draw projectiles
+            ctx.fillStyle = 'black';
+            game.projectiles.forEach(projectile => {
+                ctx.fillRect(projectile.x, projectile.y, projectile.width, projectile.height);
+            });
+
+            // Draw enemies
+            game.enemies.forEach(enemy => {
+                ctx.save();
+                if (enemy.frozen) {
+                    ctx.globalAlpha = 0.7;
+                    ctx.fillStyle = '#ADD8E6';  // Light blue color
+                    ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);  // Blue overlay
+                }
+                ctx.drawImage(
+                    game.sprites.enemy,
+                    enemy.x,
+                    enemy.y,
+                    enemy.width,
+                    enemy.height
+                );
+                ctx.restore();
+            });
+
+            // Draw lives using cowboy sprite
+            for(let i = 0; i < game.playerLives; i++) {
+                ctx.drawImage(
+                    game.sprites.player,
+                    10 + (i * 40),  // Adjust spacing
+                    80,             // Adjust vertical position
+                    30,             // Small size for life icons
+                    30
+                );
+            }
+
+            // Draw ammo counter
+            ctx.fillStyle = 'black';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText(`Ammo: ${game.currentAmmo}/${game.maxAmmo}`, 10, 160);
+
+            // Draw power-ups with hover effect
+            game.powerUps.forEach(powerUp => {
+                ctx.fillStyle = powerUp.color;
+                
+                // Check if mouse is over this power-up
+                const isHovered = 
+                    lastMouseX >= powerUp.x && 
+                    lastMouseX <= powerUp.x + powerUp.width &&
+                    lastMouseY >= powerUp.y && 
+                    lastMouseY <= powerUp.y + powerUp.height;
+                
+                // Add highlight effect on hover
+                if (isHovered) {
+                    ctx.globalAlpha = 0.8;
+                    ctx.fillRect(powerUp.x - 5, powerUp.y - 5, 
+                                powerUp.width + 10, powerUp.height + 10);
+                    ctx.globalAlpha = 1;
+                }
+                
+                ctx.fillRect(powerUp.x, powerUp.y, powerUp.width, powerUp.height);
+                
+                // Draw power-up text with smaller font and word wrap
+                ctx.fillStyle = 'white';
+                ctx.font = '16px Arial'; // Smaller font size
+                ctx.textAlign = 'center';
+                const words = powerUp.text.split(' ');
+                if (words.length > 1) {
+                    ctx.fillText(words[0], 
+                                powerUp.x + powerUp.width/2, 
+                                powerUp.y + powerUp.height/2 - 10);
+                    ctx.fillText(words[1], 
+                                powerUp.x + powerUp.width/2, 
+                                powerUp.y + powerUp.height/2 + 10);
+                } else {
+                    ctx.fillText(powerUp.text, 
+                                powerUp.x + powerUp.width/2, 
+                                powerUp.y + powerUp.height/2);
+                }
+            });
+
+            // Draw barriers
+            ctx.fillStyle = '#4b5320';  // Military green color
+            game.barriers.forEach(barrier => {
+                ctx.fillRect(barrier.x, barrier.y, barrier.width, barrier.height);
+            });
+
+            // Update score displays
+            document.getElementById('currentScore').textContent = game.score;
+            document.getElementById('highScore').textContent = game.highScore;
+            document.getElementById('waveNumber').textContent = game.wave;
+
+            if (game.isGameOver) {
+                document.getElementById('gameOverOverlay').style.display = 'block';
+                document.getElementById('finalScore').textContent = game.score;
+                document.getElementById('finalHighScore').textContent = game.highScore;
+            } else {
+                document.getElementById('gameOverOverlay').style.display = 'none';
+            }
+
+            if (game.isPaused && !game.choosingPowerUp) {  // Only show pause overlay if not choosing power-ups
+                document.getElementById('pauseOverlay').style.display = 'block';
+            } else {
+                document.getElementById('pauseOverlay').style.display = 'none';
+            }
+
+            // Add cooldown display for invisibility
+            if (game.invisibilityCooldown > 0 && game.availablePowerUps.find(p => p.type === 'invisibility').level > 0) {
+                ctx.fillStyle = 'black';
+                ctx.font = '14px Arial';
+                ctx.textAlign = 'left';
+                ctx.fillText(`Invisibility: ${Math.ceil(game.invisibilityCooldown / 1000)}s`, 10, 130);
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Add mouse position tracking
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            lastMouseX = e.clientX - rect.left;
+            lastMouseY = e.clientY - rect.top;
+        });
+
+        function resumeGame() {
+            game.togglePause();
+        }
+
+        function restartGame() {
+            game.restart();
+        }
+
+        document.getElementById('pauseButton').addEventListener('click', () => {
+            game.togglePause();
+        });
+
+        gameLoop();
+    </script>
+</body>
+</html> 
